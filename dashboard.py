@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import dataclasses
 import datetime as _dt
 import sys
 from pathlib import Path
@@ -33,13 +34,26 @@ st.set_page_config(page_title="StockAdvisor", page_icon="📊", layout="wide")
 CFG = load_config()
 
 
+# 사이드바에서 고를 수 있는 모델 (라벨 -> 모델 ID)
+MODEL_CHOICES = {
+    "Opus 4.8 — 최고 품질·고비용": "claude-opus-4-8",
+    "Sonnet 4.6 — 균형·저비용": "claude-sonnet-4-6",
+    "Haiku 4.5 — 가장 빠르고 저렴": "claude-haiku-4-5-20251001",
+}
+
+
 # --------------------------------------------------------------- 런타임
 @st.cache_resource(show_spinner=False)
-def get_runtime(offline: bool):
-    """공급자/엔진은 비싸므로 캐시(세션 재사용)."""
-    provider = build_provider(CFG, offline=offline, log=lambda *_a, **_k: None)
-    engine = build_engine(CFG, offline=offline)
-    return provider, engine
+def get_provider(offline: bool):
+    """데이터 공급자 캐시 (모델과 무관)."""
+    return build_provider(CFG, offline=offline, log=lambda *_a, **_k: None)
+
+
+@st.cache_resource(show_spinner=False)
+def get_engine(offline: bool, model: str):
+    """분석 엔진 캐시 (오프라인 여부 + 선택 모델별)."""
+    cfg = dataclasses.replace(CFG, model=model)
+    return build_engine(cfg, offline=offline)
 
 
 def _now() -> str:
@@ -61,6 +75,24 @@ with st.sidebar:
     offline = st.toggle("오프라인 모드 (모의 데이터)", value=False,
                         help="네트워크/API 없이 규칙기반 엔진으로 빠르게 점검")
 
+    # 모델 선택 (Claude API 엔진에만 적용)
+    _labels = list(MODEL_CHOICES.keys())
+    _default_idx = next(
+        (i for i, lbl in enumerate(_labels) if MODEL_CHOICES[lbl] == CFG.model), 0
+    )
+    _llm_disabled = offline or not CFG.has_api_key
+    model_label = st.selectbox(
+        "분석 모델",
+        _labels,
+        index=_default_idx,
+        disabled=_llm_disabled,
+        help="전문가 에이전트(Claude API) 분석에 사용할 모델. "
+        "오프라인/키 미설정 시 규칙기반 엔진이 사용되어 적용되지 않습니다.",
+    )
+    selected_model = MODEL_CHOICES[model_label]
+    if not _llm_disabled and selected_model != "claude-opus-4-8":
+        st.caption("💡 비용↓ 모델 선택됨 (temperature 적용 모델)")
+
     st.divider()
     st.subheader("런타임 상태")
     if offline:
@@ -72,7 +104,7 @@ with st.sidebar:
             st.warning("규칙기반 엔진\n\n전문가 토론을 켜려면 .env 에 ANTHROPIC_API_KEY 설정")
         st.write("국내 데이터:", "한국투자증권(KIS)" if CFG.has_kis else "무료(yfinance)")
         st.write("해외 데이터:", "무료(yfinance)")
-    st.caption(f"모델: {CFG.model}")
+    st.caption(f"적용 모델: {selected_model if not _llm_disabled else '규칙기반(모델 미사용)'}")
     st.divider()
     st.caption("⚠️ 참고용 분석이며 투자 권유가 아닙니다.")
 
@@ -92,7 +124,8 @@ with tab_analyze:
         if not tickers:
             st.error("종목을 1개 이상 입력하세요.")
         else:
-            provider, engine = get_runtime(offline)
+            provider = get_provider(offline)
+            engine = get_engine(offline, selected_model)
             with st.status("분석 진행 중...", expanded=True) as status:
                 service = AdvisorService(CFG, provider, engine, log=status.write)
                 result = service.analyze(tickers)
@@ -244,7 +277,8 @@ with tab_monitor:
         if not holdings:
             st.error("보유 종목을 1개 이상 입력하세요.")
         else:
-            provider, engine = get_runtime(offline)
+            provider = get_provider(offline)
+            engine = get_engine(offline, selected_model)
             with st.status("모니터링 진행 중...", expanded=True) as status:
                 review = MonitorService(CFG, provider, engine, log=status.write).monitor(
                     holdings, base_currency, float(cash)
