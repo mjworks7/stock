@@ -149,6 +149,48 @@ class TestCompositeRouting(unittest.TestCase):
         self.assertEqual(fb.calls, ["005930"])
 
 
+class TestHangulInput(unittest.TestCase):
+    def test_hangul_detected_as_kr(self):
+        self.assertIs(detect_market("영원무역"), Market.KR)
+        t = resolve_ticker("영원무역")
+        self.assertIs(t.market, Market.KR)
+        self.assertEqual(t.yf_symbol, "")  # 코드는 공급자가 해석
+
+
+class _NoDataProvider(MarketDataProvider):
+    """가격이 없는(N/A) 종목을 흉내내는 스텁."""
+
+    def get_stock_data(self, ticker):
+        sd = StockData(ticker=ticker, currency=ticker.market.currency)
+        sd.warnings.append("테스트: 데이터 없음")
+        return sd  # price 등 전부 None
+
+    def get_macro(self, market):
+        return MacroSnapshot(as_of="x", market=market)
+
+
+class TestNoDataGuard(unittest.TestCase):
+    def test_no_data_verdict(self):
+        from stockadvisor.agents.heuristic import HeuristicEngine
+        from stockadvisor.application.service import AdvisorService
+        from stockadvisor.config import load_config
+
+        cfg = load_config()
+        svc = AdvisorService(cfg, _NoDataProvider(), HeuristicEngine(cfg), log=lambda *_: None)
+        res = svc.analyze(["AAPL"])
+        self.assertEqual(len(res.verdicts), 1)
+        v = res.verdicts[0]
+        self.assertEqual(v.action, "분석불가")
+        self.assertEqual(v.valuation_judgment, "데이터없음")
+        self.assertIsNone(v.current_price)
+        self.assertEqual(v.total_score, 0.0)
+        # 가짜 0원 목표가가 아니라 None 이어야 함
+        for b in v.target_prices.bands():
+            self.assertIsNone(b.base)
+        # 데이터 없는 종목은 순위에서 제외
+        self.assertEqual(res.ranking, [])
+
+
 class TestTemperatureGate(unittest.TestCase):
     def test_opus_4_8_excluded(self):
         from stockadvisor.agents.llm import _supports_temperature

@@ -10,7 +10,7 @@ import datetime as _dt
 from typing import Any, Optional
 
 from ..domain import MacroSnapshot, Market, StockData, Ticker
-from .provider import MarketDataProvider
+from .provider import MarketDataProvider, ensure_kr_code as _ensure_kr_code
 
 
 def _f(v: Any) -> Optional[float]:
@@ -43,7 +43,13 @@ class FreeMarketDataProvider(MarketDataProvider):
     # ----------------------------------------------------------------- stock
     def get_stock_data(self, ticker: Ticker) -> StockData:
         yf = self._yf
+        ticker = _ensure_kr_code(ticker)
         data = StockData(ticker=ticker, currency=ticker.market.currency)
+        if ticker.market is Market.KR and not ticker.yf_symbol:
+            data.warnings.append(
+                f"'{ticker.raw}' 을(를) KRX 코드로 변환하지 못했습니다 — 정확한 종목코드(예: 111770)를 입력하세요."
+            )
+            return data
 
         yf_symbol, info = self._resolve_symbol_info(ticker)
         if yf_symbol != ticker.yf_symbol:

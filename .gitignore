@@ -22,8 +22,11 @@ portfolio.yml
 portfolio.json
 !portfolio.example.yaml
 
+# 개인 분석 결과 폴더
+pro/
+
 # Temp / scratch
 out.md
 err*.log
-st.log
+st*.log
 ._uploaded_portfolio*

@@ -17,6 +17,8 @@ from ..domain import (
     RankingEntry,
     StockData,
     StockVerdict,
+    TargetBand,
+    TargetPrices,
 )
 
 
@@ -64,6 +66,12 @@ class AdvisorService:
                 self.log(f"[데이터] {tk.display()} 시세/재무 수집 중...")
                 data: StockData = self.provider.get_stock_data(tk)
 
+                # 가격 데이터가 없으면 가짜 수치 대신 '분석불가' 판단으로 단락(LLM 비용 절감)
+                if data.price is None:
+                    self.log(f"[건너뜀] {data.ticker.display()} 가격 데이터 없음 — 분석 불가")
+                    result.verdicts.append(self._no_data_verdict(data))
+                    continue
+
                 macro_op = macro_op_cache[tk.market]
                 self.log(f"[섹터] {data.ticker.display()} 산업/섹터 분석...")
                 sector_op = self.engine.analyze_sector(data, result.macro[tk.market.value])
@@ -82,11 +90,41 @@ class AdvisorService:
                 self.log(f"[오류] {msg}")
                 result.errors.append(msg)
 
-        # 3) 종목 간 추천 순위
-        if result.verdicts:
+        # 3) 종목 간 추천 순위 (데이터 없는 '분석불가' 종목은 비교에서 제외)
+        ranked = [v for v in result.verdicts if v.total_score > 0]
+        if ranked:
             self.log("[순위] 종목 비교 및 추천 순위 산출...")
-            entries, summary = self.engine.rank(result.verdicts)
+            entries, summary = self.engine.rank(ranked)
             result.ranking = entries
             result.ranking_summary = summary
 
         return result
+
+    def _no_data_verdict(self, data: StockData) -> StockVerdict:
+        """가격/재무 데이터가 없을 때의 명시적 '분석불가' 판단(가짜 수치 없음)."""
+        h = self.cfg.horizons
+        reason = "; ".join(data.warnings) if data.warnings else "종목코드/시장을 확인하세요."
+        tp = TargetPrices(
+            short_term=TargetBand(horizon=h.get("short_term", "1-3개월"), rationale="데이터 없음"),
+            mid_term=TargetBand(horizon=h.get("mid_term", "6-12개월"), rationale="데이터 없음"),
+            long_term=TargetBand(horizon=h.get("long_term", "1-3년"), rationale="데이터 없음"),
+        )
+        return StockVerdict(
+            ticker=data.ticker,
+            currency=data.currency,
+            current_price=None,
+            valuation_judgment="데이터없음",
+            action="분석불가",
+            conviction=0.0,
+            total_score=0.0,
+            target_prices=tp,
+            stop_loss=None,
+            suggested_position_pct=None,
+            thesis=(
+                "현재가·재무 데이터를 가져오지 못해 정량 분석을 수행할 수 없습니다. "
+                f"({reason}) 정확한 종목코드 입력 또는 데이터 소스를 확인한 뒤 재시도하세요."
+            ),
+            key_risks=["데이터 부재로 평가 불가 — 가짜 수치 산출을 방지하기 위해 분석을 보류했습니다."],
+            catalysts=[],
+            opinions=[],
+        )

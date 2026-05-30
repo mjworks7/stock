@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ..domain import MacroSnapshot, Market, StockData, Ticker
-from .provider import MarketDataProvider
+from .provider import MarketDataProvider, ensure_kr_code as _ensure_kr_code
 
 REAL_BASE = "https://openapi.koreainvestment.com:9443"
 PAPER_BASE = "https://openapivts.koreainvestment.com:29443"
@@ -140,8 +140,14 @@ class KisMarketDataProvider(MarketDataProvider):
     def get_stock_data(self, ticker: Ticker) -> StockData:
         if ticker.market is not Market.KR:
             raise ValueError("KisMarketDataProvider 는 국내(KR) 종목만 지원합니다.")
+        ticker = _ensure_kr_code(ticker)
         code = ticker.raw.split(".")[0]
         data = StockData(ticker=ticker, currency="KRW")
+        if not code.isdigit():
+            data.warnings.append(
+                f"'{ticker.raw}' 을(를) KRX 코드로 변환하지 못했습니다 — 정확한 종목코드(예: 111770)를 입력하세요."
+            )
+            return data
 
         self._fill_price(code, data)
         self._fill_financials(code, data)
