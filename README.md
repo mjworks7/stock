@@ -56,7 +56,20 @@ KIS_PAPER=0          # 1 이면 모의투자 도메인
 설정하면 **국내(6자리) 종목은 KIS, 해외 종목은 무료 공급자**로 자동 라우팅됩니다.
 KIS 호출이 실패하면 자동으로 무료 공급자로 폴백합니다. (미설정 시 전 종목 무료 공급자)
 
-## 🚀 사용법
+## 🖥️ 웹 대시보드 (Streamlit)
+
+브라우저에서 분석·모니터링을 한 화면에서:
+
+```powershell
+pip install -r requirements.txt
+streamlit run dashboard.py
+```
+
+- **종목 분석 탭** — 종목 입력 → 추천 순위표 + 종목별 적정성·기간별 목표가·전문가 의견
+- **보유 모니터링 탭** — 보유 내역 표 편집(또는 파일 업로드) → 평가손익·비중 차트·집중도 경고·리밸런싱
+- 사이드바에서 **오프라인 모드** 토글, 엔진/데이터 출처 상태 확인, 리포트 다운로드
+
+## 🚀 사용법 (CLI)
 
 ```powershell
 # 단일/복수 종목 (해외+국내 혼합 가능)
@@ -132,6 +145,7 @@ src/stockadvisor/
   agents/        # 전문가 런타임 — 페르소나 로더 + LLM 엔진 / 규칙기반 엔진
   application/   # 오케스트레이션(service) + 모니터링(monitor) + 리포트(report)
   cli.py         # 명령행 진입점 (analyze / monitor 서브커맨드)
+dashboard.py     # Streamlit 웹 대시보드 (서비스 계층 재사용)
 ```
 
 데이터 계층이 인터페이스로 추상화되어 있어, 다른 **유료 API(Alpha Vantage, Polygon 등)**

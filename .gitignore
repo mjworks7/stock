@@ -25,3 +25,5 @@ portfolio.json
 # Temp / scratch
 out.md
 err*.log
+st.log
+._uploaded_portfolio*
