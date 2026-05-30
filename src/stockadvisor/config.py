@@ -60,12 +60,20 @@ class Config:
 
     # 런타임 파생
     api_key: str | None = None
+    # 한국투자증권(KIS) OpenAPI (국내 종목 정밀 데이터, 선택)
+    kis_app_key: str | None = None
+    kis_app_secret: str | None = None
+    kis_paper: bool = False
     project_root: Path = PROJECT_ROOT
     agents_dir: Path = AGENTS_DIR
 
     @property
     def has_api_key(self) -> bool:
         return bool(self.api_key)
+
+    @property
+    def has_kis(self) -> bool:
+        return bool(self.kis_app_key and self.kis_app_secret)
 
     @property
     def report_path(self) -> Path:
@@ -93,5 +101,8 @@ def load_config(config_path: Path | None = None) -> Config:
         horizons=data.get("horizons") or _DEFAULTS["horizons"],
         report_dir=data.get("report_dir", "reports"),
         api_key=os.environ.get("ANTHROPIC_API_KEY"),
+        kis_app_key=os.environ.get("KIS_APP_KEY"),
+        kis_app_secret=os.environ.get("KIS_APP_SECRET"),
+        kis_paper=os.environ.get("KIS_PAPER", "").strip() in ("1", "true", "True"),
     )
     return cfg

@@ -8,5 +8,6 @@ PyYAML>=6.0
 yfinance>=0.2.40
 finance-datareader>=0.9.50
 pandas>=2.2
+requests>=2.31   # 한국투자증권(KIS) OpenAPI 호출용
 # pykrx is optional KR enrichment; install if available on your Python version
 pykrx>=1.0.45 ; python_version < "3.13"

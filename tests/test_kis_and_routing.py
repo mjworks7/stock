@@ -1,0 +1,153 @@
+"""KIS 파싱 + 컴포지트 라우팅 단위 테스트 (네트워크/키 불필요).
+
+실행:  python -m unittest tests.test_kis_and_routing  (프로젝트 루트에서, src 가 경로에 있어야 함)
+또는:  python tests/test_kis_and_routing.py
+"""
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from stockadvisor.data.composite_provider import CompositeProvider  # noqa: E402
+from stockadvisor.data.kis_provider import KisMarketDataProvider  # noqa: E402
+from stockadvisor.data.provider import (  # noqa: E402
+    MarketDataProvider,
+    detect_market,
+    resolve_ticker,
+)
+from stockadvisor.domain import MacroSnapshot, Market, StockData, Ticker  # noqa: E402
+
+
+# ----------------------------- 가짜 HTTP 계층 -----------------------------
+class _FakeResp:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+class _FakeRequests:
+    def post(self, url, json=None, timeout=None):
+        return _FakeResp({"access_token": "tok", "expires_in": 86400})
+
+    def get(self, url, headers=None, params=None, timeout=None):
+        if "inquire-price" in url:
+            return _FakeResp(
+                {
+                    "rt_cd": "0",
+                    "output": {
+                        "stck_prpr": "71000",
+                        "per": "12.5",
+                        "pbr": "1.3",
+                        "w52_hgpr": "88000",
+                        "w52_lwpr": "60000",
+                        "hts_avls": "4200000",  # 억원
+                        "bstp_kor_isnm": "전기전자",
+                        "hts_kor_isnm": "삼성전자",
+                    },
+                }
+            )
+        if "financial-ratio" in url:
+            return _FakeResp(
+                {
+                    "rt_cd": "0",
+                    "output": [{"grs": "8.1", "ntin_inrt": "15.2", "roe_val": "9.4"}],
+                }
+            )
+        raise AssertionError(f"예상치 못한 URL: {url}")
+
+
+# ----------------------------- 스텁 공급자 -----------------------------
+class _StubProvider(MarketDataProvider):
+    def __init__(self, tag, raises=False):
+        self.tag = tag
+        self.raises = raises
+        self.calls = []
+
+    def get_stock_data(self, ticker):
+        self.calls.append(ticker.raw)
+        if self.raises:
+            raise RuntimeError(f"{self.tag} 실패")
+        sd = StockData(ticker=ticker, currency=ticker.market.currency)
+        sd.warnings.append(self.tag)
+        return sd
+
+    def get_macro(self, market):
+        return MacroSnapshot(as_of="x", market=market, notes=[self.tag])
+
+
+class TestTickerDetection(unittest.TestCase):
+    def test_market_detection(self):
+        self.assertIs(detect_market("005930"), Market.KR)
+        self.assertIs(detect_market("000660.KQ"), Market.KR)
+        self.assertIs(detect_market("AAPL"), Market.US)
+
+    def test_resolve(self):
+        self.assertEqual(resolve_ticker("005930").yf_symbol, "005930.KS")
+        self.assertEqual(resolve_ticker("000660.KQ").yf_symbol, "000660.KQ")
+        self.assertEqual(resolve_ticker("aapl").yf_symbol, "AAPL")
+
+
+class TestKisParsing(unittest.TestCase):
+    def _provider(self):
+        tmp = Path(tempfile.mkdtemp()) / "tok.json"
+        p = KisMarketDataProvider("k", "s", token_cache=tmp)
+        p._requests = _FakeRequests()  # HTTP 주입
+        return p
+
+    def test_stock_data(self):
+        p = self._provider()
+        data = p.get_stock_data(resolve_ticker("005930"))
+        self.assertEqual(data.currency, "KRW")
+        self.assertEqual(data.price, 71000.0)
+        self.assertEqual(data.per, 12.5)
+        self.assertEqual(data.pbr, 1.3)
+        self.assertEqual(data.week52_high, 88000.0)
+        self.assertEqual(data.market_cap, 4200000 * 1e8)
+        self.assertEqual(data.revenue_growth, 8.1)
+        self.assertEqual(data.earnings_growth, 15.2)
+        self.assertEqual(data.roe, 9.4)
+        self.assertEqual(data.sector, "전기전자")
+        self.assertEqual(data.ticker.name, "삼성전자")
+
+    def test_rejects_us(self):
+        p = self._provider()
+        with self.assertRaises(ValueError):
+            p.get_stock_data(resolve_ticker("AAPL"))
+
+    def test_token_cached(self):
+        p = self._provider()
+        t1 = p._access_token()
+        t2 = p._access_token()
+        self.assertEqual(t1, t2)
+
+
+class TestCompositeRouting(unittest.TestCase):
+    def test_routes_by_market(self):
+        kr, us, macro = _StubProvider("KR"), _StubProvider("US"), _StubProvider("MACRO")
+        c = CompositeProvider(kr, us, macro)
+        c.get_stock_data(resolve_ticker("005930"))
+        c.get_stock_data(resolve_ticker("AAPL"))
+        self.assertEqual(kr.calls, ["005930"])
+        self.assertEqual(us.calls, ["AAPL"])
+        self.assertEqual(c.get_macro(Market.KR).notes, ["MACRO"])
+
+    def test_fallback_on_failure(self):
+        kr = _StubProvider("KR", raises=True)
+        us = _StubProvider("US")
+        fb = _StubProvider("FALLBACK")
+        c = CompositeProvider(kr, us, us, fallback=fb)
+        data = c.get_stock_data(resolve_ticker("005930"))
+        self.assertIn("FALLBACK", data.warnings)
+        self.assertEqual(fb.calls, ["005930"])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

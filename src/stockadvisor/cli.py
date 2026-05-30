@@ -16,8 +16,7 @@ from .agents.engine import build_engine
 from .application.report import build_markdown, write_report
 from .application.service import AdvisorService
 from .config import load_config
-from .data.free_provider import FreeMarketDataProvider
-from .data.mock_provider import MockMarketDataProvider
+from .data.factory import build_provider
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -56,23 +55,21 @@ def main(argv: list[str] | None = None) -> int:
 
     # 데이터 공급자 + 엔진 선택
     if args.offline:
-        provider = MockMarketDataProvider()
         log("실행 모드: 오프라인(모의 데이터 + 규칙기반 엔진)")
-    else:
-        try:
-            provider = FreeMarketDataProvider(lookback_days=cfg.price_lookback_days)
-        except Exception as e:
-            print(
-                f"[오류] 데이터 라이브러리 로드 실패: {e}\n"
-                "  pip install -r requirements.txt 를 먼저 실행하거나 --offline 로 시도하세요.",
-                file=sys.stderr,
-            )
-            return 2
-        if not cfg.has_api_key:
-            log(
-                "주의: ANTHROPIC_API_KEY 가 없어 규칙기반 엔진으로 분석합니다.\n"
-                "      전문가 에이전트 실시간 토론을 원하면 .env 에 키를 설정하세요."
-            )
+    try:
+        provider = build_provider(cfg, offline=args.offline, log=log)
+    except Exception as e:
+        print(
+            f"[오류] 데이터 라이브러리 로드 실패: {e}\n"
+            "  pip install -r requirements.txt 를 먼저 실행하거나 --offline 로 시도하세요.",
+            file=sys.stderr,
+        )
+        return 2
+    if not args.offline and not cfg.has_api_key:
+        log(
+            "주의: ANTHROPIC_API_KEY 가 없어 규칙기반 엔진으로 분석합니다.\n"
+            "      전문가 에이전트 실시간 토론을 원하면 .env 에 키를 설정하세요."
+        )
 
     engine = build_engine(cfg, offline=args.offline)
     log(f"분석 엔진: {type(engine).__name__}")

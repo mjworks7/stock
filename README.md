@@ -41,6 +41,20 @@ copy .env.example .env
 
 > 키가 없어도 동작합니다. 그 경우 **규칙기반(휴리스틱) 엔진**으로 정량 지표만으로 분석합니다.
 
+### (선택) 국내 종목 정밀 데이터 — 한국투자증권(KIS) OpenAPI
+
+국내 종목의 밸류에이션/재무 정확도를 높이려면 KIS 키를 설정합니다.
+[apiportal.koreainvestment.com](https://apiportal.koreainvestment.com) 에서 앱 등록 후 발급:
+
+```dotenv
+KIS_APP_KEY=...
+KIS_APP_SECRET=...
+KIS_PAPER=0          # 1 이면 모의투자 도메인
+```
+
+설정하면 **국내(6자리) 종목은 KIS, 해외 종목은 무료 공급자**로 자동 라우팅됩니다.
+KIS 호출이 실패하면 자동으로 무료 공급자로 폴백합니다. (미설정 시 전 종목 무료 공급자)
+
 ## 🚀 사용법
 
 ```powershell
@@ -82,14 +96,16 @@ python run.py AAPL --json
 src/stockadvisor/
   domain/        # 순수 데이터 모델 (외부 의존 없음)
   data/          # 시세/재무 공급자 — MarketDataProvider 인터페이스로 교체 가능
-                 #   free_provider(yfinance/FDR), mock_provider(오프라인)
+                 #   free_provider(yfinance/FDR), kis_provider(한국투자증권),
+                 #   composite_provider(시장별 라우팅), mock_provider(오프라인)
   agents/        # 전문가 런타임 — 페르소나 로더 + LLM 엔진 / 규칙기반 엔진
   application/   # 오케스트레이션(service) + 리포트 생성(report)
   cli.py         # 명령행 진입점
 ```
 
-데이터 계층이 인터페이스로 추상화되어 있어, 나중에 **유료 API(한국투자증권 OpenAPI,
-Alpha Vantage 등)** 로 교체하려면 `MarketDataProvider` 를 구현한 클래스만 추가하면 됩니다.
+데이터 계층이 인터페이스로 추상화되어 있어, 다른 **유료 API(Alpha Vantage, Polygon 등)**
+로 확장하려면 `MarketDataProvider` 를 구현한 클래스를 추가하고 `data/factory.py` 에 끼우면 됩니다.
+국내 종목용 **한국투자증권(KIS) 공급자**는 이미 포함되어 있습니다(`data/kis_provider.py`).
 
 ## ⚙️ 설정 (`config.yaml`)
 
