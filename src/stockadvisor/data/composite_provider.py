@@ -39,3 +39,6 @@ class CompositeProvider(MarketDataProvider):
 
     def get_macro(self, market: Market) -> MacroSnapshot:
         return self.macro_provider.get_macro(market)
+
+    def get_fx_usdkrw(self) -> float:
+        return self.macro_provider.get_fx_usdkrw()

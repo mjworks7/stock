@@ -10,6 +10,7 @@ from ..config import Config
 from ..domain import (
     AnalystOpinion,
     MacroSnapshot,
+    PortfolioReview,
     RankingEntry,
     StockData,
     StockVerdict,
@@ -244,3 +245,64 @@ class HeuristicEngine:
                 f"({top.total_score:.0f}점). 점수가 높을수록 매수 매력도가 큼."
             )
         return entries, summary
+
+    # --------------------------------------------------------- 포트폴리오
+    def review_portfolio(self, review: PortfolioReview) -> PortfolioReview:
+        risk = self.cfg.risk or {}
+        stop_pct = float(risk.get("default_stop_loss_pct", 10))
+        max_pos = float(risk.get("max_position_pct", 20))
+        max_dd = float(risk.get("portfolio_max_drawdown_pct", 20))
+
+        alerts: list[str] = []
+        rebal: list[str] = []
+
+        for p in review.positions:
+            p.stop_loss = round(p.avg_price * (1 - stop_pct / 100.0), 2)
+            # 조치 판단(우선순위: 손절 > 비중축소 > 익절 > 보유)
+            if p.pnl_pct <= -stop_pct:
+                p.action = "손절"
+                p.flags.append(f"손절선 이탈({p.pnl_pct:+.1f}%)")
+            elif p.weight_pct > max_pos * 1.5:
+                p.action = "비중축소"
+                p.flags.append(f"과대 집중({p.weight_pct:.0f}%)")
+            elif p.pnl_pct >= 25:
+                p.action = "일부익절"
+                p.flags.append(f"이익 실현 구간(+{p.pnl_pct:.0f}%)")
+            elif p.weight_pct > max_pos:
+                p.action = "보유"
+                p.flags.append(f"비중 주의({p.weight_pct:.0f}%)")
+            else:
+                p.action = "보유"
+            p.comment = (
+                f"수익률 {p.pnl_pct:+.1f}%, 비중 {p.weight_pct:.1f}% → '{p.action}' "
+                f"(손절가 {p.stop_loss:,.0f})"
+            )
+            if p.weight_pct > max_pos:
+                rebal.append(
+                    f"{p.ticker.display()} 비중 {p.weight_pct:.0f}% → {max_pos:.0f}% 이하로 축소 검토"
+                )
+
+        # 포트폴리오 레벨 경고
+        if review.positions:
+            top = max(review.positions, key=lambda x: x.weight_pct)
+            if top.weight_pct > max_pos:
+                alerts.append(
+                    f"최대 비중 종목 {top.ticker.display()} {top.weight_pct:.0f}% — 집중 위험"
+                )
+        for sec, w in review.sector_weights.items():
+            if w > 40:
+                alerts.append(f"섹터 '{sec}' 비중 {w:.0f}% — 섹터 집중 위험")
+        if review.total_pnl_pct <= -max_dd:
+            alerts.append(
+                f"포트폴리오 평가손익 {review.total_pnl_pct:+.1f}% — 최대낙폭 한도({max_dd:.0f}%) 근접/초과"
+            )
+        losers = [p for p in review.positions if p.pnl_pct <= -stop_pct]
+
+        review.risk_alerts = alerts or ["뚜렷한 집중/손실 경고 없음(규칙기반)"]
+        review.rebalancing = rebal or ["현재 비중 정책 위반 없음"]
+        review.summary = (
+            f"규칙기반 점검: 총 {len(review.positions)}종목, "
+            f"평가손익 {review.total_pnl_pct:+.1f}%. 손절 검토 {len(losers)}종목, "
+            f"비중 초과 {len(rebal)}건. (정성 분석은 ANTHROPIC_API_KEY 설정 시 강화됨)"
+        )
+        return review

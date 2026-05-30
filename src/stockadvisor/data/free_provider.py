@@ -189,6 +189,10 @@ class FreeMarketDataProvider(MarketDataProvider):
                 snap.notes.append(f"{label} 조회 실패")
         return snap
 
+    def get_fx_usdkrw(self) -> float:
+        level, _ = self._level_and_trend(self._yf, "USDKRW=X")
+        return level or 1350.0
+
     def _level_and_trend(self, yf, symbol: str):
         try:
             hist = yf.Ticker(symbol).history(period="6mo")

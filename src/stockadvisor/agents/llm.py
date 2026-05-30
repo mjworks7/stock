@@ -10,6 +10,7 @@ from ..config import Config
 from ..domain import (
     AnalystOpinion,
     MacroSnapshot,
+    PortfolioReview,
     RankingEntry,
     StockData,
     StockVerdict,
@@ -17,9 +18,9 @@ from ..domain import (
     TargetPrices,
     Ticker,
 )
-from .context import format_macro, format_stock
+from .context import format_macro, format_portfolio, format_stock
 from .loader import AGENT_ROLES, load_persona
-from .schemas import OPINION_SCHEMA, RANKING_SCHEMA, VERDICT_SCHEMA
+from .schemas import MONITOR_SCHEMA, OPINION_SCHEMA, RANKING_SCHEMA, VERDICT_SCHEMA
 
 
 class _Client:
@@ -225,6 +226,37 @@ class LLMEngine:
             )
         entries.sort(key=lambda e: e.rank)
         return entries, str(d.get("summary", ""))
+
+    # ----------------------------------------------------------- 포트폴리오
+    def review_portfolio(self, review: PortfolioReview) -> PortfolioReview:
+        risk = self.cfg.risk or {}
+        user = (
+            format_portfolio(review)
+            + f"\n\n[리스크 정책] 단일종목 비중 주의 {risk.get('max_position_pct',20)}%,"
+            f" 종목 손절 기준 {risk.get('default_stop_loss_pct',10)}%,"
+            f" 포트폴리오 최대낙폭 한도 {risk.get('portfolio_max_drawdown_pct',20)}%."
+            + "\n\n위 보유 포트폴리오를 리스크 매니저 관점에서 점검하고 submit_review 로 제출하라."
+            + " 각 종목의 조치(추가매수/보유/일부익절/비중축소/손절)와 손절가, 한 줄 코멘트를 제시하고,"
+            + " 집중도/손실/변동성 리스크 경고와 리밸런싱 제안, 종합 코멘트를 포함하라."
+        )
+        d = self.client.structured(
+            self._persona("portfolio-risk-manager"), user, "submit_review", MONITOR_SCHEMA
+        )
+        by_raw = {p.ticker.raw: p for p in review.positions}
+        for item in d.get("positions", []):
+            raw = str(item.get("ticker", "")).split(".")[0]
+            pos = by_raw.get(raw)
+            if pos is None:
+                continue
+            pos.action = str(item.get("action", pos.action))
+            pos.comment = str(item.get("comment", ""))
+            sl = _num(item.get("stop_loss"))
+            if sl is not None:
+                pos.stop_loss = sl
+        review.risk_alerts = list(d.get("risk_alerts", [])) or review.risk_alerts
+        review.rebalancing = list(d.get("rebalancing", []))
+        review.summary = str(d.get("summary", ""))
+        return review
 
 
 def _num(v):

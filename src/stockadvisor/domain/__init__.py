@@ -10,6 +10,7 @@ from .models import (
     TargetPrices,
     Ticker,
 )
+from .portfolio import Holding, PortfolioReview, Position
 
 __all__ = [
     "Market",
@@ -21,4 +22,7 @@ __all__ = [
     "TargetPrices",
     "StockVerdict",
     "RankingEntry",
+    "Holding",
+    "Position",
+    "PortfolioReview",
 ]

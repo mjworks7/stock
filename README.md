@@ -7,6 +7,7 @@
 - **투자 기간별 목표 금액** — 단기(1–3개월) / 중기(6–12개월) / 장기(1–3년) 목표가 밴드
 - **손절가·권고 비중** 제시
 - **여러 종목 입력 시 평가 + 추천 순위** 산출
+- **보유 종목 모니터링** — 평가손익·비중·집중도 점검 + 종목별 조치/리밸런싱 제안
 
 ## 🤝 전문가 에이전트가 직접 분석합니다
 
@@ -75,6 +76,36 @@ python run.py AAPL --json
 - 종목 코드 규칙: **6자리 숫자 → 국내(KRX)**, 알파벳 → **미국**. (`005930` = 삼성전자, `AAPL` = 애플)
 - 국내 종목은 `.KS`(코스피)/`.KQ`(코스닥)를 자동 판별합니다.
 
+### 💼 보유 종목 모니터링
+
+보유 중인 포트폴리오의 **평가손익·비중·집중도**를 점검하고, 종목별 조치
+(추가매수/보유/일부익절/비중축소/손절)·손절가·리밸런싱 제안을 제시합니다.
+
+```powershell
+# 1) 예시를 복사해 본인 보유내역으로 수정 (portfolio.yaml 은 git 추적 제외)
+copy portfolio.example.yaml portfolio.yaml
+
+# 2) 모니터링 실행
+python run.py monitor --file portfolio.yaml
+python run.py monitor --file portfolio.yaml --offline   # 모의 데이터
+```
+
+포트폴리오 파일 형식(`portfolio.example.yaml` 참고):
+
+```yaml
+base_currency: KRW      # 비중/총액 환산 기준통화 (KRW 또는 USD)
+cash: 1000000           # 보유 현금(선택)
+holdings:
+  - ticker: "005930"    # 국내는 6자리 코드(따옴표 권장)
+    shares: 50
+    avg_price: 70000    # 평균 매수단가(종목 통화)
+  - ticker: AAPL
+    shares: 20
+    avg_price: 180
+```
+
+> KRW·USD 혼합 보유도 실시간 환율(USD/KRW)로 환산해 비중을 계산합니다.
+
 ### 옵션
 
 | 옵션 | 설명 |
@@ -99,8 +130,8 @@ src/stockadvisor/
                  #   free_provider(yfinance/FDR), kis_provider(한국투자증권),
                  #   composite_provider(시장별 라우팅), mock_provider(오프라인)
   agents/        # 전문가 런타임 — 페르소나 로더 + LLM 엔진 / 규칙기반 엔진
-  application/   # 오케스트레이션(service) + 리포트 생성(report)
-  cli.py         # 명령행 진입점
+  application/   # 오케스트레이션(service) + 모니터링(monitor) + 리포트(report)
+  cli.py         # 명령행 진입점 (analyze / monitor 서브커맨드)
 ```
 
 데이터 계층이 인터페이스로 추상화되어 있어, 다른 **유료 API(Alpha Vantage, Polygon 등)**

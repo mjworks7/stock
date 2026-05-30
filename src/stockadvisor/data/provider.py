@@ -56,3 +56,7 @@ class MarketDataProvider(ABC):
     @abstractmethod
     def get_macro(self, market: Market) -> MacroSnapshot:
         """해당 시장의 거시/국면 스냅샷을 반환."""
+
+    def get_fx_usdkrw(self) -> float:
+        """USD/KRW 환율. 기본 구현은 보수적 상수(공급자가 오버라이드)."""
+        return 1350.0

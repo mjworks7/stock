@@ -16,6 +16,12 @@ reports/*.md
 reports/*.json
 !reports/.gitkeep
 
+# 개인 보유 포트폴리오 (예시 파일은 추적)
+portfolio.yaml
+portfolio.yml
+portfolio.json
+!portfolio.example.yaml
+
 # Temp / scratch
 out.md
 err*.log

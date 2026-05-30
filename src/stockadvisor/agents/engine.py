@@ -8,7 +8,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from ..config import Config
-from ..domain import AnalystOpinion, MacroSnapshot, RankingEntry, StockData, StockVerdict
+from ..domain import (
+    AnalystOpinion,
+    MacroSnapshot,
+    PortfolioReview,
+    RankingEntry,
+    StockData,
+    StockVerdict,
+)
 
 
 class AnalysisEngine(ABC):
@@ -43,6 +50,12 @@ class AnalysisEngine(ABC):
     @abstractmethod
     def rank(self, verdicts: list[StockVerdict]) -> tuple[list[RankingEntry], str]:
         """여러 종목 종합 판단을 비교하여 추천 순위 + 총평을 산출."""
+        ...
+
+    @abstractmethod
+    def review_portfolio(self, review: PortfolioReview) -> PortfolioReview:
+        """정량 지표가 채워진 보유 포트폴리오에 리스크 매니저 관점의
+        정성 가이드(종목별 조치/경고/리밸런싱/총평)를 추가해 반환."""
         ...
 
 

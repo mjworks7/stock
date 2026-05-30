@@ -89,6 +89,41 @@ VERDICT_SCHEMA = {
     ],
 }
 
+# 보유 포트폴리오 점검 스키마
+MONITOR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "positions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "ticker": {"type": "string", "description": "종목 코드/심볼(raw)."},
+                    "action": {
+                        "type": "string",
+                        "enum": ["추가매수", "보유", "일부익절", "비중축소", "손절"],
+                    },
+                    "stop_loss": {"type": "number", "description": "권고 손절가(종목 통화)."},
+                    "comment": {"type": "string", "description": "이 종목에 대한 한 줄 조치 의견."},
+                },
+                "required": ["ticker", "action", "comment"],
+            },
+        },
+        "risk_alerts": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "집중도/손실/변동성 등 포트폴리오 리스크 경고.",
+        },
+        "rebalancing": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "리밸런싱/비중 조정 제안.",
+        },
+        "summary": {"type": "string", "description": "포트폴리오 종합 코멘트 2~4문장."},
+    },
+    "required": ["positions", "risk_alerts", "rebalancing", "summary"],
+}
+
 # 순위 산출 스키마
 RANKING_SCHEMA = {
     "type": "object",

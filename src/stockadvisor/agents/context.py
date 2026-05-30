@@ -1,7 +1,7 @@
 """LLM 입력용 컨텍스트 포매팅 — 정량 데이터를 읽기 좋은 텍스트로 변환."""
 from __future__ import annotations
 
-from ..domain import MacroSnapshot, StockData
+from ..domain import MacroSnapshot, PortfolioReview, StockData
 
 
 def _fmt(v, unit: str = "") -> str:
@@ -38,6 +38,31 @@ def format_stock(data: StockData) -> str:
     if data.warnings:
         lines.append("--- 데이터 경고 ---")
         lines.extend(f"- {w}" for w in data.warnings)
+    return "\n".join(lines)
+
+
+def format_portfolio(review: PortfolioReview) -> str:
+    bc = review.base_currency
+    lines = [
+        f"기준통화: {bc} | USD/KRW: {review.fx_usdkrw:,.1f}",
+        f"총 평가금액({bc}): {review.total_value_base:,.0f} | 총 매입금액: {review.total_cost_base:,.0f}",
+        f"총 평가손익: {review.total_pnl_base:,.0f} ({review.total_pnl_pct:+.1f}%) | 현금: {review.cash_base:,.0f}",
+        "",
+        "[보유 종목]",
+    ]
+    for p in review.positions:
+        flags = f" | 경고: {', '.join(p.flags)}" if p.flags else ""
+        lines.append(
+            f"- {p.ticker.raw} ({p.ticker.name}) [{p.ticker.market.value}/{p.sector or '-'}]: "
+            f"보유 {p.shares:g}주, 평단 {p.avg_price:,.2f}, 현재 {_fmt(p.current_price)}, "
+            f"수익률 {p.pnl_pct:+.1f}%, 비중 {p.weight_pct:.1f}%{flags}"
+        )
+    if review.sector_weights:
+        sw = ", ".join(f"{k} {v:.0f}%" for k, v in review.sector_weights.items())
+        lines.append(f"\n섹터 비중: {sw}")
+    if review.market_weights:
+        mw = ", ".join(f"{k} {v:.0f}%" for k, v in review.market_weights.items())
+        lines.append(f"시장 비중: {mw}")
     return "\n".join(lines)
 
 

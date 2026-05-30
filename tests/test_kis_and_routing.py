@@ -149,5 +149,58 @@ class TestCompositeRouting(unittest.TestCase):
         self.assertEqual(fb.calls, ["005930"])
 
 
+class _PricedStub(MarketDataProvider):
+    """고정 현재가/섹터를 돌려주는 스텁 (환율 1500 고정)."""
+
+    PRICES = {"005930": (90000.0, "전기전자"), "AAPL": (200.0, "Technology")}
+
+    def get_stock_data(self, ticker):
+        price, sector = self.PRICES[ticker.raw]
+        sd = StockData(ticker=ticker, currency=ticker.market.currency)
+        sd.price = price
+        sd.sector = sector
+        return sd
+
+    def get_macro(self, market):
+        return MacroSnapshot(as_of="x", market=market)
+
+    def get_fx_usdkrw(self) -> float:
+        return 1500.0
+
+
+class TestMonitorMath(unittest.TestCase):
+    def _review(self):
+        from stockadvisor.agents.heuristic import HeuristicEngine
+        from stockadvisor.application.monitor import MonitorService
+        from stockadvisor.config import load_config
+        from stockadvisor.domain import Holding
+
+        cfg = load_config()
+        svc = MonitorService(cfg, _PricedStub(), HeuristicEngine(cfg), log=lambda *_: None)
+        holdings = [
+            Holding("005930", shares=100, avg_price=70000),  # KR
+            Holding("AAPL", shares=10, avg_price=150),        # US
+        ]
+        return svc.monitor(holdings, base_currency="KRW", cash=0.0)
+
+    def test_pnl_and_weights(self):
+        r = self._review()
+        kr = next(p for p in r.positions if p.ticker.raw == "005930")
+        us = next(p for p in r.positions if p.ticker.raw == "AAPL")
+        # 수익률
+        self.assertAlmostEqual(kr.pnl_pct, (90000 / 70000 - 1) * 100, places=4)
+        self.assertAlmostEqual(us.pnl_pct, (200 / 150 - 1) * 100, places=4)
+        # 기준통화(KRW) 환산 평가금액: KR=9,000,000 / US=10*200*1500=3,000,000
+        self.assertAlmostEqual(kr.value_base, 9_000_000, places=2)
+        self.assertAlmostEqual(us.value_base, 3_000_000, places=2)
+        self.assertAlmostEqual(r.total_value_base, 12_000_000, places=2)
+        # 비중 75% / 25%
+        self.assertAlmostEqual(kr.weight_pct, 75.0, places=2)
+        self.assertAlmostEqual(us.weight_pct, 25.0, places=2)
+        # 집중 경고 + 조치(휴리스틱)가 채워졌는지
+        self.assertTrue(kr.action)
+        self.assertTrue(r.risk_alerts)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
