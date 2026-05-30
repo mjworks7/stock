@@ -149,6 +149,18 @@ class TestCompositeRouting(unittest.TestCase):
         self.assertEqual(fb.calls, ["005930"])
 
 
+class TestTemperatureGate(unittest.TestCase):
+    def test_opus_4_8_excluded(self):
+        from stockadvisor.agents.llm import _supports_temperature
+
+        # opus-4-8 은 temperature 지원 안 함
+        self.assertFalse(_supports_temperature("claude-opus-4-8"))
+        self.assertFalse(_supports_temperature("claude-opus-4-8[1m]"))
+        # 그 외 모델은 지원
+        self.assertTrue(_supports_temperature("claude-sonnet-4-6"))
+        self.assertTrue(_supports_temperature("claude-haiku-4-5-20251001"))
+
+
 class _PricedStub(MarketDataProvider):
     """고정 현재가/섹터를 돌려주는 스텁 (환율 1500 고정)."""
 

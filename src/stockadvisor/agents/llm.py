@@ -23,6 +23,16 @@ from .loader import AGENT_ROLES, load_persona
 from .schemas import MONITOR_SCHEMA, OPINION_SCHEMA, RANKING_SCHEMA, VERDICT_SCHEMA
 
 
+def _supports_temperature(model: str) -> bool:
+    """temperature 파라미터를 지원하지 않는 모델이면 False.
+
+    claude-opus-4-8 등 일부 최신 모델은 temperature 가 deprecated 됐다.
+    """
+    m = (model or "").lower()
+    deprecated = ("opus-4-8",)
+    return not any(tag in m for tag in deprecated)
+
+
 class _Client:
     """Anthropic 메시지 API 얇은 래퍼 (구조화 출력 + 캐싱)."""
 
@@ -35,10 +45,9 @@ class _Client:
     def structured(
         self, persona: str, user_text: str, tool_name: str, schema: dict
     ) -> dict:
-        resp = self._client.messages.create(
+        kwargs: dict = dict(
             model=self.cfg.model,
             max_tokens=self.cfg.max_tokens,
-            temperature=self.cfg.temperature,
             system=[
                 {
                     "type": "text",
@@ -56,6 +65,10 @@ class _Client:
             tool_choice={"type": "tool", "name": tool_name},
             messages=[{"role": "user", "content": user_text}],
         )
+        # 일부 최신 모델(예: opus-4-8)은 temperature 파라미터를 지원하지 않는다.
+        if _supports_temperature(self.cfg.model):
+            kwargs["temperature"] = self.cfg.temperature
+        resp = self._client.messages.create(**kwargs)
         for block in resp.content:
             if block.type == "tool_use" and block.name == tool_name:
                 return dict(block.input)
