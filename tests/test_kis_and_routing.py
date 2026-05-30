@@ -23,8 +23,9 @@ from stockadvisor.domain import MacroSnapshot, Market, StockData, Ticker  # noqa
 
 # ----------------------------- 가짜 HTTP 계층 -----------------------------
 class _FakeResp:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self._payload = payload
+        self.status_code = status_code
 
     def raise_for_status(self):
         pass
@@ -60,6 +61,16 @@ class _FakeRequests:
                     "rt_cd": "0",
                     "output": [{"grs": "8.1", "ntin_inrt": "15.2", "roe_val": "9.4"}],
                 }
+            )
+        if "profit-ratio" in url:
+            return _FakeResp({"rt_cd": "0", "output": [{"sale_ntin_rate": "11.0"}]})
+        if "stability-ratio" in url:
+            return _FakeResp(
+                {"rt_cd": "0", "output": [{"lblt_rate": "45.0", "crnt_rate": "180.0"}]}
+            )
+        if "income-statement" in url:
+            return _FakeResp(
+                {"rt_cd": "0", "output": [{"sale_account": "1000.0", "bsop_prti": "120.0"}]}
             )
         raise AssertionError(f"예상치 못한 URL: {url}")
 
@@ -116,6 +127,11 @@ class TestKisParsing(unittest.TestCase):
         self.assertEqual(data.roe, 9.4)
         self.assertEqual(data.sector, "전기전자")
         self.assertEqual(data.ticker.name, "삼성전자")
+        # 수익성·안정성·손익 보강 필드
+        self.assertEqual(data.profit_margin, 11.0)        # sale_ntin_rate
+        self.assertEqual(data.debt_to_equity, 45.0)       # lblt_rate
+        self.assertEqual(data.current_ratio, 1.8)         # crnt_rate(180)/100
+        self.assertEqual(data.operating_margin, 12.0)     # bsop_prti/sale_account
 
     def test_rejects_us(self):
         p = self._provider()

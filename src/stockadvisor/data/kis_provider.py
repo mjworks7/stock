@@ -25,7 +25,10 @@ PAPER_BASE = "https://openapivts.koreainvestment.com:29443"
 
 # 시세/재무 조회 TR ID (국내주식)
 TR_PRICE = "FHKST01010100"          # 주식현재가 시세
-TR_FIN_RATIO = "FHKST66430300"      # 국내주식 재무비율
+TR_FIN_RATIO = "FHKST66430300"      # 재무비율(성장률/ROE)
+TR_PROFIT_RATIO = "FHKST66430400"   # 수익성비율(순이익률 등)
+TR_STABILITY_RATIO = "FHKST66430600"  # 안정성비율(부채비율/유동비율)
+TR_INCOME = "FHKST66430200"         # 손익계산서(매출/영업이익)
 
 
 def _f(v: Any) -> Optional[float]:
@@ -125,16 +128,29 @@ class KisMarketDataProvider(MarketDataProvider):
             "custtype": "P",
         }
 
-    def _get(self, path: str, tr_id: str, params: dict[str, str]) -> dict:
+    def _get(self, path: str, tr_id: str, params: dict[str, str], retries: int = 2) -> dict:
+        """GET 호출. KIS 의 일시적 5xx/속도제한에 대비해 짧은 재시도를 수행."""
+        import time
+
         url = f"{self.base}{path}"
-        resp = self._requests.get(
-            url, headers=self._headers(tr_id), params=params, timeout=self.timeout
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if str(data.get("rt_cd", "0")) not in ("0", ""):
-            raise RuntimeError(f"KIS API 오류({path}): {data.get('msg1')}")
-        return data
+        last_exc: Exception | None = None
+        for attempt in range(retries + 1):
+            resp = self._requests.get(
+                url, headers=self._headers(tr_id), params=params, timeout=self.timeout
+            )
+            if resp.status_code >= 500:
+                # 서버측 일시 오류 — 잠깐 쉬고 재시도
+                last_exc = RuntimeError(f"{resp.status_code} Server Error for {path}")
+                if attempt < retries:
+                    time.sleep(0.4 * (attempt + 1))
+                    continue
+                raise last_exc
+            resp.raise_for_status()
+            data = resp.json()
+            if str(data.get("rt_cd", "0")) not in ("0", ""):
+                raise RuntimeError(f"KIS API 오류({path}): {data.get('msg1')}")
+            return data
+        raise last_exc or RuntimeError(f"KIS 호출 실패: {path}")
 
     # ------------------------------------------------------------- 종목
     def get_stock_data(self, ticker: Ticker) -> StockData:
@@ -151,6 +167,7 @@ class KisMarketDataProvider(MarketDataProvider):
 
         self._fill_price(code, data)
         self._fill_financials(code, data)
+        self._fill_extra_financials(code, data)
 
         name = self._resolve_name(code) or data.ticker.name or code
         data.ticker = Ticker(
@@ -209,6 +226,49 @@ class KisMarketDataProvider(MarketDataProvider):
         data.earnings_growth = _f(latest.get("ntin_inrt"))     # 순이익 증가율
         data.roe = _f(latest.get("roe_val"))                   # ROE
         # 영업이익 증가율은 모멘텀 참고용으로 둘 수 있으나 직접 매핑 필드는 생략
+
+    def _fill_extra_financials(self, code: str, data: StockData) -> None:
+        """수익성·안정성 비율 + 손익계산서로 영업이익률·순이익률·부채비율·유동비율 보강."""
+        params = {
+            "fid_cond_mrkt_div_code": "J",
+            "fid_input_iscd": code,
+            "fid_div_cls_code": "0",  # 0=연간
+        }
+        # 수익성비율: 순이익률(매출액순이익률)
+        try:
+            rows = self._get(
+                "/uapi/domestic-stock/v1/finance/profit-ratio", TR_PROFIT_RATIO, params
+            ).get("output", []) or []
+            if rows:
+                data.profit_margin = _f(rows[0].get("sale_ntin_rate"))
+        except Exception as e:
+            data.warnings.append(f"KIS 수익성비율 조회 실패: {e}")
+
+        # 안정성비율: 부채비율(lblt_rate, %), 유동비율(crnt_rate, % → 배수로 환산)
+        try:
+            rows = self._get(
+                "/uapi/domestic-stock/v1/finance/stability-ratio", TR_STABILITY_RATIO, params
+            ).get("output", []) or []
+            if rows:
+                data.debt_to_equity = _f(rows[0].get("lblt_rate"))
+                crnt = _f(rows[0].get("crnt_rate"))
+                if crnt is not None:
+                    data.current_ratio = round(crnt / 100.0, 2)  # 253.91% -> 2.54배
+        except Exception as e:
+            data.warnings.append(f"KIS 안정성비율 조회 실패: {e}")
+
+        # 손익계산서: 영업이익률 = 영업이익 / 매출액
+        try:
+            rows = self._get(
+                "/uapi/domestic-stock/v1/finance/income-statement", TR_INCOME, params
+            ).get("output", []) or []
+            if rows:
+                sales = _f(rows[0].get("sale_account"))
+                op = _f(rows[0].get("bsop_prti"))
+                if sales and op is not None and sales != 0:
+                    data.operating_margin = round(op / sales * 100, 2)
+        except Exception as e:
+            data.warnings.append(f"KIS 손익계산서 조회 실패: {e}")
 
     # ------------------------------------------------------------- 이름
     def _resolve_name(self, code: str) -> Optional[str]:
