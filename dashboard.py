@@ -19,6 +19,12 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
 from stockadvisor.agents.engine import build_engine  # noqa: E402
+from stockadvisor.application.history import (  # noqa: E402
+    list_recent,
+    load_markdown,
+    save_analysis,
+    save_portfolio,
+)
 from stockadvisor.application.monitor import MonitorService, load_portfolio  # noqa: E402
 from stockadvisor.application.report import (  # noqa: E402
     build_markdown,
@@ -109,7 +115,9 @@ with st.sidebar:
     st.caption("⚠️ 참고용 분석이며 투자 권유가 아닙니다.")
 
 
-tab_analyze, tab_monitor = st.tabs(["📊 종목 분석", "💼 보유 모니터링"])
+tab_analyze, tab_monitor, tab_history = st.tabs(
+    ["📊 종목 분석", "💼 보유 모니터링", "🕘 히스토리"]
+)
 
 
 # =============================================================== 종목 분석
@@ -212,8 +220,14 @@ with tab_analyze:
                             for cat in v.catalysts:
                                 st.write("- ", cat)
 
-                # 다운로드
-                md = build_markdown(result, CFG, _now())
+                # 히스토리 자동 저장 + 다운로드
+                _now_dt = _dt.datetime.now()
+                md = build_markdown(result, CFG, _now_dt.strftime("%Y-%m-%d %H:%M:%S"))
+                try:
+                    entry = save_analysis(result, CFG, _now_dt, md)
+                    st.caption(f"🕘 히스토리에 저장됨 · {entry.md_path}")
+                except Exception as e:
+                    st.caption(f"히스토리 저장 실패: {e}")
                 st.download_button(
                     "📄 마크다운 리포트 다운로드",
                     md,
@@ -334,10 +348,60 @@ with tab_monitor:
                 for e in review.errors:
                     st.error(e)
 
-            md = build_portfolio_markdown(review, CFG, _now(), type(engine).__name__)
+            _now_dt = _dt.datetime.now()
+            md = build_portfolio_markdown(
+                review, CFG, _now_dt.strftime("%Y-%m-%d %H:%M:%S"), type(engine).__name__
+            )
+            try:
+                entry = save_portfolio(review, CFG, _now_dt, type(engine).__name__, md)
+                st.caption(f"🕘 히스토리에 저장됨 · {entry.md_path}")
+            except Exception as e:
+                st.caption(f"히스토리 저장 실패: {e}")
             st.download_button(
                 "📄 마크다운 리포트 다운로드",
                 md,
                 file_name="portfolio_report.md",
                 mime="text/markdown",
             )
+
+
+# =============================================================== 히스토리
+with tab_history:
+    st.header("분석 히스토리")
+    cols = st.columns([1, 3])
+    if cols[0].button("🔄 새로고침"):
+        st.rerun()
+    kind_filter = cols[1].radio(
+        "종류 필터", ["전체", "📊 종목분석", "💼 모니터링"], horizontal=True,
+        label_visibility="collapsed",
+    )
+
+    entries = list_recent(CFG, limit=50)
+    if kind_filter == "📊 종목분석":
+        entries = [e for e in entries if e.kind == "analysis"]
+    elif kind_filter == "💼 모니터링":
+        entries = [e for e in entries if e.kind == "portfolio"]
+
+    if not entries:
+        st.info("아직 저장된 분석이 없습니다. 분석/모니터링을 실행하면 자동으로 기록됩니다.")
+    else:
+        st.caption(f"최근 {len(entries)}건 (reports/ 폴더에 저장됨)")
+        labels = [
+            f"[{e.generated_at}] {e.kind_label} · {e.title[:50]} · {e.engine}"
+            for e in entries
+        ]
+        idx = st.radio(
+            "기록 선택", range(len(entries)), format_func=lambda i: labels[i],
+            label_visibility="collapsed",
+        )
+        sel = entries[idx]
+        if sel.summary:
+            st.info(sel.summary)
+        with st.expander("📄 리포트 전체 보기", expanded=True):
+            st.markdown(load_markdown(sel.md_path))
+        st.download_button(
+            "📄 이 리포트 다운로드",
+            load_markdown(sel.md_path),
+            file_name=Path(sel.md_path).name,
+            mime="text/markdown",
+        )

@@ -12,16 +12,12 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
-import json
 import sys
 
 from .agents.engine import build_engine
+from .application.history import list_recent, load_markdown, save_analysis, save_portfolio
 from .application.monitor import MonitorService, load_portfolio
-from .application.report import (
-    build_markdown,
-    build_portfolio_markdown,
-    write_report,
-)
+from .application.report import build_markdown, build_portfolio_markdown
 from .application.service import AdvisorService
 from .config import Config, load_config
 from .data.factory import build_provider
@@ -93,25 +89,9 @@ def _run_analyze(argv: list[str], cfg: Config) -> int:
     print(markdown)
 
     if not args.no_save:
-        stamp = now.strftime("%Y%m%d_%H%M%S")
-        codes = "-".join(v.ticker.raw for v in result.verdicts)[:40]
-        md_path = write_report(markdown, cfg, f"report_{stamp}_{codes}.md")
-        log(f"\n📄 리포트 저장: {md_path}")
-        if args.json:
-            payload = {
-                "generated_at": generated_at,
-                "engine": result.engine_kind,
-                "ranking": [e.to_dict() for e in result.ranking],
-                "ranking_summary": result.ranking_summary,
-                "verdicts": [v.to_dict() for v in result.verdicts],
-                "macro": {k: s.to_dict() for k, s in result.macro.items()},
-                "errors": result.errors,
-            }
-            json_path = cfg.report_path / f"report_{stamp}_{codes}.json"
-            json_path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            log(f"📄 JSON 저장: {json_path}")
+        entry = save_analysis(result, cfg, now, markdown)
+        log(f"\n📄 리포트 저장: {entry.md_path}")
+        log(f"📄 히스토리(JSON): {entry.json_path}")
     return 0
 
 
@@ -155,15 +135,38 @@ def _run_monitor(argv: list[str], cfg: Config) -> int:
     print(markdown)
 
     if not args.no_save:
-        stamp = now.strftime("%Y%m%d_%H%M%S")
-        md_path = write_report(markdown, cfg, f"portfolio_{stamp}.md")
-        log(f"\n📄 리포트 저장: {md_path}")
-        if args.json:
-            json_path = cfg.report_path / f"portfolio_{stamp}.json"
-            json_path.write_text(
-                json.dumps(review.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            log(f"📄 JSON 저장: {json_path}")
+        entry = save_portfolio(review, cfg, now, type(engine).__name__, markdown)
+        log(f"\n📄 리포트 저장: {entry.md_path}")
+        log(f"📄 히스토리(JSON): {entry.json_path}")
+    return 0
+
+
+# --------------------------------------------------------------- history
+def _run_history(argv: list[str], cfg: Config) -> int:
+    p = argparse.ArgumentParser(
+        prog="stockadvisor history", description="최근 분석/모니터링 기록 보기."
+    )
+    p.add_argument("--limit", type=int, default=20, help="표시 개수")
+    p.add_argument("--show", type=int, default=None, help="목록 번호의 리포트 전체 출력")
+    args = p.parse_args(argv)
+
+    entries = list_recent(cfg, args.limit)
+    if not entries:
+        print("저장된 분석 기록이 없습니다. 먼저 분석을 실행하세요.")
+        return 0
+    if args.show is not None:
+        idx = args.show - 1
+        if 0 <= idx < len(entries):
+            print(load_markdown(entries[idx].md_path))
+            return 0
+        print(f"잘못된 번호입니다 (1~{len(entries)}).", file=sys.stderr)
+        return 1
+    print(f"🕘 최근 분석 기록 ({len(entries)}건)\n")
+    for i, e in enumerate(entries, 1):
+        print(f"{i:>2}. [{e.generated_at}] {e.kind_label}  {e.title}  · {e.engine}")
+        if e.summary:
+            print(f"     └ {e.summary[:110]}")
+    print("\n전체 리포트 보기:  python run.py history --show <번호>")
     return 0
 
 
@@ -175,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
     # 서브커맨드 디스패치 (기본: analyze, 하위호환 유지)
     if argv and argv[0] == "monitor":
         return _run_monitor(argv[1:], cfg)
+    if argv and argv[0] == "history":
+        return _run_history(argv[1:], cfg)
     if argv and argv[0] == "analyze":
         return _run_analyze(argv[1:], cfg)
     return _run_analyze(argv, cfg)
