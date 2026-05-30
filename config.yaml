@@ -1,0 +1,37 @@
+# StockAdvisor configuration
+# 모든 값은 합리적 기본값이며 자유롭게 조정하세요.
+
+# 런타임 분석 엔진에 사용할 Claude 모델
+model: "claude-opus-4-8"
+# 빠르고 저렴하게 돌리고 싶으면 위를 주석 처리하고 아래를 사용:
+# model: "claude-sonnet-4-6"
+
+max_tokens: 4000          # 에이전트 1회 응답 최대 토큰
+temperature: 0.3          # 분석은 낮은 온도로 일관성 유지
+
+# 데이터 조회 범위
+price_lookback_days: 400  # 가격 히스토리 조회 기간(이동평균/수익률 계산용)
+
+# 종합 점수 가중치 (포트폴리오 매니저가 순위 산출 시 참고)
+# 합이 1.0이 되도록 유지
+weights:
+  macro: 0.15        # 거시/시장 국면
+  sector: 0.20       # 산업/섹터 매력도
+  fundamental: 0.30  # 기업 펀더멘털
+  valuation: 0.25    # 밸류에이션(주가 적정성)
+  technical: 0.10    # 가격 모멘텀/기술적
+
+# 리스크 기본 가이드 (포트폴리오 매니저 기본 정책)
+risk:
+  max_position_pct: 20        # 단일 종목 권고 상한(%)
+  default_stop_loss_pct: 10   # 종목 단위 손절 기본(%)
+  portfolio_max_drawdown_pct: 20
+
+# 투자 기간 정의 (리포트 목표가 산출 기준)
+horizons:
+  short_term: "1-3개월"
+  mid_term: "6-12개월"
+  long_term: "1-3년"
+
+# 리포트 출력 폴더
+report_dir: "reports"

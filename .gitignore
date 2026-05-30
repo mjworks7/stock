@@ -1,0 +1,20 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Generated reports
+reports/*.md
+reports/*.json
+!reports/.gitkeep
+
+# Temp / scratch
+out.md
+err*.log
