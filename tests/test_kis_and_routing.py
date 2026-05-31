@@ -271,6 +271,27 @@ class TestMonitorMath(unittest.TestCase):
         self.assertTrue(kr.action)
         self.assertTrue(r.risk_alerts)
 
+    def test_per_stock_currency_override(self):
+        """미국 종목을 원화 평단(currency=KRW)으로 관리하는 경우."""
+        from stockadvisor.agents.heuristic import HeuristicEngine
+        from stockadvisor.application.monitor import MonitorService
+        from stockadvisor.config import load_config
+        from stockadvisor.domain import Holding
+
+        cfg = load_config()
+        svc = MonitorService(cfg, _PricedStub(), HeuristicEngine(cfg), log=lambda *_: None)
+        # AAPL 네이티브가 200달러, 환율 1500 → 원화 현재가 300,000
+        r = svc.monitor(
+            [Holding("AAPL", shares=10, avg_price=250000, currency="KRW")],
+            base_currency="KRW",
+            cash=0.0,
+        )
+        p = r.positions[0]
+        self.assertEqual(p.currency, "KRW")
+        self.assertAlmostEqual(p.current_price, 300000.0, places=2)  # 200 USD * 1500
+        self.assertAlmostEqual(p.pnl_pct, (300000 / 250000 - 1) * 100, places=4)
+        self.assertAlmostEqual(p.value_base, 3_000_000.0, places=2)  # 10 * 300,000
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

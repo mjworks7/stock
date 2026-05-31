@@ -9,10 +9,25 @@ import json
 from pathlib import Path
 from typing import Any
 
+from typing import Optional
+
 from ..agents.engine import AnalysisEngine
 from ..config import Config
 from ..data.provider import MarketDataProvider, resolve_ticker
 from ..domain import Holding, Market, PortfolioReview, Position
+
+
+def convert_currency(
+    amount: Optional[float], from_cur: str, to_cur: str, fx_usdkrw: float
+) -> Optional[float]:
+    """KRW↔USD 환산. 같은 통화거나 값이 없으면 그대로."""
+    if amount is None or from_cur == to_cur:
+        return amount
+    if from_cur == "USD" and to_cur == "KRW":
+        return amount * fx_usdkrw
+    if from_cur == "KRW" and to_cur == "USD":
+        return amount / fx_usdkrw if fx_usdkrw else amount
+    return amount
 
 
 def load_portfolio(path: Path) -> tuple[list[Holding], str, float]:
@@ -35,11 +50,13 @@ def load_portfolio(path: Path) -> tuple[list[Holding], str, float]:
     cash = float(data.get("cash", 0) or 0)
     holdings: list[Holding] = []
     for h in data.get("holdings", []):
+        cur = h.get("currency")
         holdings.append(
             Holding(
                 raw_ticker=str(h["ticker"]),
                 shares=float(h["shares"]),
                 avg_price=float(h["avg_price"]),
+                currency=str(cur).upper() if cur else None,
             )
         )
     if not holdings:
@@ -66,9 +83,11 @@ class MonitorService:
 
         for h in holdings:
             tk = resolve_ticker(h.raw_ticker)
+            native_cur = tk.market.currency          # 종목이 실제 거래되는 통화
+            pos_cur = (h.currency or native_cur).upper()  # 평단/표시 통화
             pos = Position(
                 ticker=tk,
-                currency=tk.market.currency,
+                currency=pos_cur,
                 shares=h.shares,
                 avg_price=h.avg_price,
             )
@@ -76,8 +95,9 @@ class MonitorService:
                 self.log(f"[보유] {tk.display()} 현재가 조회...")
                 data = self.provider.get_stock_data(tk)
                 pos.ticker = data.ticker
-                pos.current_price = data.price
                 pos.sector = data.sector
+                # 현재가는 네이티브 통화 → 평단 통화로 환산해 손익을 같은 통화로 계산
+                pos.current_price = convert_currency(data.price, native_cur, pos_cur, fx)
             except Exception as e:
                 review.errors.append(f"{tk.display()} 조회 실패: {e}")
 
@@ -114,13 +134,7 @@ class MonitorService:
 
     @staticmethod
     def _to_base(amount: float, currency: str, base: str, fx: float) -> float:
-        if currency == base:
-            return amount
-        if currency == "USD" and base == "KRW":
-            return amount * fx
-        if currency == "KRW" and base == "USD":
-            return amount / fx if fx else amount
-        return amount
+        return convert_currency(amount, currency, base, fx) or 0.0
 
     def _aggregate(self, review: PortfolioReview) -> None:
         total_value = sum(p.value_base for p in review.positions) + review.cash_base

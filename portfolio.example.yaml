@@ -7,13 +7,15 @@ cash: 1000000           # 보유 현금(기준통화). 선택
 holdings:
   - ticker: "005930"    # 삼성전자 (국내: 6자리 코드는 따옴표 권장)
     shares: 50
-    avg_price: 70000    # 평균 매수단가(원)
+    avg_price: 70000    # 평균 매수단가(통화 미지정 → 국내라 원화)
   - ticker: "000660"    # SK하이닉스
     shares: 5
     avg_price: 180000
-  - ticker: AAPL        # 애플 (해외: 평단은 USD)
+  - ticker: AAPL        # 애플 (해외: 통화 미지정 → 달러)
     shares: 20
     avg_price: 180
-  - ticker: NVDA        # 엔비디아
+  - ticker: NVDA        # 엔비디아 — 한국 증권사에서 '원화 평단'으로 관리하는 경우
     shares: 15
-    avg_price: 120
+    avg_price: 165000   # 평단이 원화이므로 currency 로 KRW 명시
+    currency: KRW       # 종목별 통화 지정(KRW/USD). 생략 시 시장 기준 자동
+

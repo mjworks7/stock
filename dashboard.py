@@ -248,7 +248,12 @@ with tab_monitor:
     uploaded = st.file_uploader("포트폴리오 파일 업로드(선택)", type=["yaml", "yml", "json"])
 
     default_rows = pd.DataFrame(
-        {"ticker": ["005930", "AAPL"], "shares": [50.0, 20.0], "avg_price": [70000.0, 180.0]}
+        {
+            "ticker": ["005930", "AAPL"],
+            "shares": [50.0, 20.0],
+            "avg_price": [70000.0, 180.0],
+            "통화": ["자동", "자동"],
+        }
     )
     if uploaded is not None:
         tmp = Path("._uploaded_portfolio" + Path(uploaded.name).suffix)
@@ -256,7 +261,15 @@ with tab_monitor:
         try:
             holds, base_currency, cash = load_portfolio(tmp)
             default_rows = pd.DataFrame(
-                [{"ticker": h.raw_ticker, "shares": h.shares, "avg_price": h.avg_price} for h in holds]
+                [
+                    {
+                        "ticker": h.raw_ticker,
+                        "shares": h.shares,
+                        "avg_price": h.avg_price,
+                        "통화": h.currency or "자동",
+                    }
+                    for h in holds
+                ]
             )
             st.success(f"업로드 반영: {len(holds)}종목, 기준통화 {base_currency}")
         except Exception as e:
@@ -264,7 +277,7 @@ with tab_monitor:
         finally:
             tmp.unlink(missing_ok=True)
 
-    st.markdown("**보유 종목 (편집 가능)**")
+    st.markdown("**보유 종목 (편집 가능)** — 통화는 평단 기준. '자동'은 국내=₩, 미국=$")
     edited = st.data_editor(
         default_rows,
         num_rows="dynamic",
@@ -273,6 +286,10 @@ with tab_monitor:
             "ticker": st.column_config.TextColumn("종목코드", help="국내 6자리 / 해외 심볼"),
             "shares": st.column_config.NumberColumn("보유수량", min_value=0.0),
             "avg_price": st.column_config.NumberColumn("평균단가", min_value=0.0),
+            "통화": st.column_config.SelectboxColumn(
+                "통화", options=["자동", "KRW", "USD"], default="자동",
+                help="평균단가의 통화. 한국 증권사에서 미국주식을 원화로 관리하면 KRW 선택",
+            ),
         },
     )
 
@@ -282,9 +299,16 @@ with tab_monitor:
             tk = str(row.get("ticker", "")).strip()
             if not tk:
                 continue
+            cur = str(row.get("통화", "자동")).strip().upper()
+            cur = None if cur in ("", "자동", "AUTO", "NONE") else cur
             try:
                 holdings.append(
-                    Holding(raw_ticker=tk, shares=float(row["shares"]), avg_price=float(row["avg_price"]))
+                    Holding(
+                        raw_ticker=tk,
+                        shares=float(row["shares"]),
+                        avg_price=float(row["avg_price"]),
+                        currency=cur,
+                    )
                 )
             except (TypeError, ValueError):
                 continue

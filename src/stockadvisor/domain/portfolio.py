@@ -9,11 +9,17 @@ from .models import Ticker
 
 @dataclass
 class Holding:
-    """사용자 입력 보유 내역."""
+    """사용자 입력 보유 내역.
+
+    currency: 평균 매수단가의 통화(KRW/USD). 미지정(None)이면 종목 시장 기준
+    자동(국내=KRW, 미국=USD). 한국 증권사에서 미국 주식을 원화 평단으로
+    관리하는 경우처럼 시장과 다른 통화를 쓸 때 명시한다.
+    """
 
     raw_ticker: str
     shares: float
-    avg_price: float  # 평균 매수단가(해당 종목 통화 기준)
+    avg_price: float  # 평균 매수단가(currency 기준)
+    currency: Optional[str] = None
 
 
 @dataclass
