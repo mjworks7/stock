@@ -207,6 +207,25 @@ class TestNoDataGuard(unittest.TestCase):
         self.assertEqual(res.ranking, [])
 
 
+class TestPortfolioSaveLoad(unittest.TestCase):
+    def test_roundtrip_preserves_currency(self):
+        import tempfile
+        from pathlib import Path
+
+        from stockadvisor.application.monitor import load_portfolio, save_portfolio_file
+        from stockadvisor.domain import Holding
+
+        tmp = Path(tempfile.mkdtemp()) / "portfolio.yaml"
+        hs = [Holding("005930", 50, 70000), Holding("NVDA", 15, 165000, currency="KRW")]
+        save_portfolio_file(tmp, hs, "KRW", 1_000_000.0)
+        out, bc, cash = load_portfolio(tmp)
+        self.assertEqual(bc, "KRW")
+        self.assertEqual(cash, 1_000_000.0)
+        self.assertEqual(out[0].raw_ticker, "005930")
+        self.assertIsNone(out[0].currency)        # 자동(미지정) 보존
+        self.assertEqual(out[1].currency, "KRW")  # 종목별 통화 보존
+
+
 class TestTemperatureGate(unittest.TestCase):
     def test_opus_4_8_excluded(self):
         from stockadvisor.agents.llm import _supports_temperature

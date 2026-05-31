@@ -64,6 +64,36 @@ def load_portfolio(path: Path) -> tuple[list[Holding], str, float]:
     return holdings, base_currency, cash
 
 
+def save_portfolio_file(
+    path: Path, holdings: list[Holding], base_currency: str, cash: float
+) -> Path:
+    """보유내역을 포트폴리오 파일(YAML/JSON)로 저장."""
+    data = {
+        "base_currency": base_currency,
+        "cash": cash,
+        "holdings": [
+            {
+                "ticker": h.raw_ticker,
+                "shares": h.shares,
+                "avg_price": h.avg_price,
+                **({"currency": h.currency} if h.currency else {}),
+            }
+            for h in holdings
+        ],
+    }
+    if path.suffix.lower() in (".yaml", ".yml"):
+        try:
+            import yaml
+
+            text = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+        except Exception:
+            text = json.dumps(data, ensure_ascii=False, indent=2)
+    else:
+        text = json.dumps(data, ensure_ascii=False, indent=2)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
 class MonitorService:
     def __init__(
         self,

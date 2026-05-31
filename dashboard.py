@@ -20,12 +20,17 @@ import streamlit as st  # noqa: E402
 
 from stockadvisor.agents.engine import build_engine  # noqa: E402
 from stockadvisor.application.history import (  # noqa: E402
+    latest_analysis_for,
     list_recent,
     load_markdown,
     save_analysis,
     save_portfolio,
 )
-from stockadvisor.application.monitor import MonitorService, load_portfolio  # noqa: E402
+from stockadvisor.application.monitor import (  # noqa: E402
+    MonitorService,
+    load_portfolio,
+    save_portfolio_file,
+)
 from stockadvisor.application.report import (  # noqa: E402
     build_markdown,
     build_portfolio_markdown,
@@ -237,53 +242,92 @@ with tab_analyze:
 
 
 # =============================================================== 보유 모니터링
+PORTFOLIO_PATH = CFG.project_root / "portfolio.yaml"
+
+
+def _rows_to_holdings(rows) -> list[Holding]:
+    holdings = []
+    for _, row in rows.iterrows():
+        tk = str(row.get("ticker", "")).strip()
+        if not tk:
+            continue
+        cur = str(row.get("통화", "자동")).strip().upper()
+        cur = None if cur in ("", "자동", "AUTO", "NONE", "NAN") else cur
+        try:
+            holdings.append(
+                Holding(
+                    raw_ticker=tk,
+                    shares=float(row["shares"]),
+                    avg_price=float(row["avg_price"]),
+                    currency=cur,
+                )
+            )
+        except (TypeError, ValueError):
+            continue
+    return holdings
+
+
 with tab_monitor:
     st.header("보유 종목 모니터링")
-    st.caption("보유 내역을 표에 입력하거나 포트폴리오 파일(YAML/JSON)을 업로드하세요.")
 
-    colA, colB = st.columns([1, 1])
-    base_currency = colA.selectbox("기준통화", ["KRW", "USD"], index=0)
-    cash = colB.number_input("보유 현금(기준통화)", min_value=0.0, value=0.0, step=100000.0)
-
-    uploaded = st.file_uploader("포트폴리오 파일 업로드(선택)", type=["yaml", "yml", "json"])
-
-    default_rows = pd.DataFrame(
-        {
-            "ticker": ["005930", "AAPL"],
-            "shares": [50.0, 20.0],
-            "avg_price": [70000.0, 180.0],
-            "통화": ["자동", "자동"],
-        }
-    )
-    if uploaded is not None:
-        tmp = Path("._uploaded_portfolio" + Path(uploaded.name).suffix)
-        tmp.write_bytes(uploaded.getvalue())
+    # 저장된 보유내역(portfolio.yaml) 자동 로드
+    init_currency, init_cash = "KRW", 0.0
+    if PORTFOLIO_PATH.exists():
         try:
-            holds, base_currency, cash = load_portfolio(tmp)
-            default_rows = pd.DataFrame(
+            _holds, init_currency, init_cash = load_portfolio(PORTFOLIO_PATH)
+            base_rows = pd.DataFrame(
                 [
-                    {
-                        "ticker": h.raw_ticker,
-                        "shares": h.shares,
-                        "avg_price": h.avg_price,
-                        "통화": h.currency or "자동",
-                    }
-                    for h in holds
+                    {"ticker": h.raw_ticker, "shares": h.shares,
+                     "avg_price": h.avg_price, "통화": h.currency or "자동"}
+                    for h in _holds
                 ]
             )
-            st.success(f"업로드 반영: {len(holds)}종목, 기준통화 {base_currency}")
+            st.caption(f"📂 저장된 보유내역 불러옴: {PORTFOLIO_PATH.name} ({len(_holds)}종목)")
         except Exception as e:
-            st.error(f"파일 파싱 실패: {e}")
-        finally:
-            tmp.unlink(missing_ok=True)
+            st.warning(f"portfolio.yaml 로드 실패: {e}")
+            base_rows = pd.DataFrame(columns=["ticker", "shares", "avg_price", "통화"])
+    else:
+        base_rows = pd.DataFrame(
+            {"ticker": ["005930", "AAPL"], "shares": [50.0, 20.0],
+             "avg_price": [70000.0, 180.0], "통화": ["자동", "자동"]}
+        )
+        st.caption("📂 저장된 보유내역이 없어 예시를 표시합니다. 편집 후 '보유내역 저장'을 누르세요.")
 
-    st.markdown("**보유 종목 (편집 가능)** — 통화는 평단 기준. '자동'은 국내=₩, 미국=$")
+    colA, colB = st.columns([1, 1])
+    base_currency = colA.selectbox(
+        "기준통화", ["KRW", "USD"], index=0 if init_currency == "KRW" else 1
+    )
+    cash = colB.number_input(
+        "보유 현금(기준통화)", min_value=0.0, value=float(init_cash), step=100000.0
+    )
+
+    with st.expander("📤 포트폴리오 파일 업로드로 교체(선택)"):
+        uploaded = st.file_uploader("YAML/JSON", type=["yaml", "yml", "json"])
+        if uploaded is not None:
+            tmp = Path("._uploaded_portfolio" + Path(uploaded.name).suffix)
+            tmp.write_bytes(uploaded.getvalue())
+            try:
+                holds, base_currency, cash = load_portfolio(tmp)
+                base_rows = pd.DataFrame(
+                    [
+                        {"ticker": h.raw_ticker, "shares": h.shares,
+                         "avg_price": h.avg_price, "통화": h.currency or "자동"}
+                        for h in holds
+                    ]
+                )
+                st.success(f"업로드 반영: {len(holds)}종목")
+            except Exception as e:
+                st.error(f"파일 파싱 실패: {e}")
+            finally:
+                tmp.unlink(missing_ok=True)
+
+    st.markdown("**보유 종목 (추가·편집 가능)** — 통화는 평단 기준. '자동'은 국내=₩, 미국=$")
     edited = st.data_editor(
-        default_rows,
+        base_rows,
         num_rows="dynamic",
         use_container_width=True,
         column_config={
-            "ticker": st.column_config.TextColumn("종목코드", help="국내 6자리 / 해외 심볼"),
+            "ticker": st.column_config.TextColumn("종목코드/명", help="국내 6자리/한글명, 해외 심볼"),
             "shares": st.column_config.NumberColumn("보유수량", min_value=0.0),
             "avg_price": st.column_config.NumberColumn("평균단가", min_value=0.0),
             "통화": st.column_config.SelectboxColumn(
@@ -291,27 +335,51 @@ with tab_monitor:
                 help="평균단가의 통화. 한국 증권사에서 미국주식을 원화로 관리하면 KRW 선택",
             ),
         },
+        key="holdings_editor",
     )
 
-    if st.button("🔍 모니터링 실행", type="primary"):
-        holdings = []
-        for _, row in edited.iterrows():
-            tk = str(row.get("ticker", "")).strip()
-            if not tk:
-                continue
-            cur = str(row.get("통화", "자동")).strip().upper()
-            cur = None if cur in ("", "자동", "AUTO", "NONE") else cur
-            try:
-                holdings.append(
-                    Holding(
-                        raw_ticker=tk,
-                        shares=float(row["shares"]),
-                        avg_price=float(row["avg_price"]),
-                        currency=cur,
-                    )
-                )
-            except (TypeError, ValueError):
-                continue
+    b1, b2 = st.columns([1, 1])
+    do_save = b1.button("💾 보유내역 저장", use_container_width=True)
+    do_run = b2.button("🔍 모니터링 실행", type="primary", use_container_width=True)
+
+    if do_save:
+        hs = _rows_to_holdings(edited)
+        if hs:
+            save_portfolio_file(PORTFOLIO_PATH, hs, base_currency, float(cash))
+            st.success(f"저장 완료: {PORTFOLIO_PATH}  ({len(hs)}종목)")
+        else:
+            st.error("저장할 보유 종목이 없습니다.")
+
+    # ── 보유 종목 + 최근 분석 요약 (즉시 표시, 시세 조회 없이 히스토리 참고) ──
+    cur_holdings = _rows_to_holdings(edited)
+    if cur_holdings:
+        st.markdown("#### 📌 보유 종목 + 최근 분석 요약")
+        summary_rows = []
+        for h in cur_holdings:
+            info = latest_analysis_for(CFG, h.raw_ticker)
+            row = {
+                "종목": h.raw_ticker,
+                "수량": h.shares,
+                "평단": h.avg_price,
+                "통화": h.currency or "자동",
+            }
+            if info:
+                row.update({
+                    "최근 적정성": info.get("valuation_judgment") or "-",
+                    "대응": info.get("action") or "-",
+                    "종합점수": round(info.get("total_score") or 0),
+                    "중기목표가": _money(info.get("target_mid"), info.get("currency") or "KRW"),
+                    "분석시각": info.get("generated_at", ""),
+                })
+            else:
+                row.update({"최근 적정성": "분석없음", "대응": "-", "종합점수": "-",
+                            "중기목표가": "-", "분석시각": "-"})
+            summary_rows.append(row)
+        st.dataframe(pd.DataFrame(summary_rows), hide_index=True, use_container_width=True)
+        st.caption("※ 최근 분석은 '📊 종목 분석' 탭에서 해당 종목을 분석하면 채워집니다.")
+
+    if do_run:
+        holdings = _rows_to_holdings(edited)
         if not holdings:
             st.error("보유 종목을 1개 이상 입력하세요.")
         else:

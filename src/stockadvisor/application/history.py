@@ -149,3 +149,40 @@ def load_markdown(md_path: str) -> str:
         return Path(md_path).read_text(encoding="utf-8")
     except Exception as e:
         return f"리포트를 불러올 수 없습니다: {e}"
+
+
+def latest_analysis_for(cfg: Config, raw_ticker: str, max_scan: int = 100) -> Optional[dict]:
+    """해당 종목의 가장 최근 분석 요약을 히스토리에서 찾는다.
+
+    종목 코드(111770) 또는 종목명(영원무역) 어느 쪽으로 입력해도 매칭한다.
+    반환: {generated_at, valuation_judgment, action, total_score, current_price,
+           currency, target_mid, thesis, name} 또는 None.
+    """
+    key = (raw_ticker or "").strip()
+    code_key = key.upper().split(".")[0]
+    for e in list_recent(cfg, max_scan):
+        if e.kind != "analysis" or not e.json_path:
+            continue
+        try:
+            data = json.loads(Path(e.json_path).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for v in data.get("verdicts", []):
+            t = v.get("ticker", {}) or {}
+            raw = str(t.get("raw", "")).upper().split(".")[0]
+            name = str(t.get("name", ""))
+            if code_key == raw or key == name or key == str(t.get("raw", "")):
+                tp = v.get("target_prices", {}) or {}
+                mid = (tp.get("mid_term") or {}).get("base")
+                return {
+                    "generated_at": e.generated_at,
+                    "valuation_judgment": v.get("valuation_judgment"),
+                    "action": v.get("action"),
+                    "total_score": v.get("total_score"),
+                    "current_price": v.get("current_price"),
+                    "currency": v.get("currency"),
+                    "target_mid": mid,
+                    "thesis": v.get("thesis", ""),
+                    "name": name or raw,
+                }
+    return None
